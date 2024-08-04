@@ -1,0 +1,93 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+*.egg-info/
+dist/
+build/
+
+# Django specific
+*.log
+*.pot
+*.pyc
+*.pyo
+*.pyd
+db.sqlite3
+*.sqlite3
+
+# If you are using SQLite database
+*.sqlite3
+
+# Django migrations
+*/migrations/*
+
+# Environment variables
+.env
+
+# Virtual environments
+venv/
+.env/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.vscode/
+.idea/
+
+# Static and media files
+/static/
+*/staticfiles/
+*/mediafiles/
+
+# Local development files
+local_settings.py
+secrets.json
+
+# macOS specific
+.DS_Store
+
+# Windows specific
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# PyCharm specific
+.idea/
+
+# Visual Studio Code specific
+.vscode/
+
+# Node modules (if using Node.js for front-end)
+node_modules/
+
+# Coverage reports
+htmlcov/
+.coverage
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+
+# MyPy cache
+.mypy_cache/
+
+# Temporary files
+*.bak
+*.swp
+
+# Docker specific
+docker-compose.override.yml
+docker-compose.local.yml
+
+# Yarn specific
+yarn-error.log
