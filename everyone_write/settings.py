@@ -31,7 +31,14 @@ ALLOWED_HOSTS = []
 # Application definition
 REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 10
+    'PAGE_SIZE': 10,
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'write_guide.authentication.CustomJWTAuthentication',
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.AllowAny',
+    ),
 }
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -41,8 +48,18 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'write_guide'
+    'rest_framework_simplejwt',
+    'write_guide',
+    'drf_yasg'
 ]
+# settings.py
+# settings.py
+
+
+# settings.py
+
+
+
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',

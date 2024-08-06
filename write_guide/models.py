@@ -2,26 +2,30 @@ from django.db import models
 from django.utils import timezone
 import uuid
 from transformers import AutoTokenizer
+
 class UtoolsUser(models.Model):
     """
     用户模型，用于存储用户的基本信息和状态。
     """
-    user_id = models.AutoField(primary_key=True)  # 用户ID，自动递增
-    username = models.CharField(max_length=255)  # 用户名称
     utool_id = models.CharField(max_length=255, unique=True)  # utoolID，唯一标识
-    default_language = models.CharField(max_length=100, default='zh-cn')  # 用户默认语言
-    learning_language = models.CharField(max_length=100, default='en')  # 用户学习语言
     registration_time = models.DateTimeField(default=timezone.now)  # 注册时间，默认当前时间
     token_balance = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)  # 用户的token余额
     update_time = models.DateTimeField(auto_now=True)  # 更新时间，每次记录更新时自动更改
     delete_time = models.DateTimeField(null=True, blank=True)  # 删除时间，可为空
 
-    def __str__(self):
-        """
-        返回用户名称作为字符串表示。
-        """
-        return self.username
 
+
+    class Meta:
+        # 数据库中的表名为 `utools_user`，遵循通常的Django约定。
+        db_table = 'utools_user'
+        verbose_name = '用户'
+        verbose_name_plural = '用户'
+
+    def is_deleted(self):
+        """
+        检查用户是否被标记为删除。
+        """
+        return self.delete_time is not None
 
 
 
@@ -33,6 +37,7 @@ class Order(models.Model):
         ('pending', 'Pending'),
         ('completed', 'Completed'),
         ('failed', 'Failed'),
+        ('unpaid', 'Unpaid'),
     ]
 
     PAYMENT_STATUS_CHOICES = [
@@ -55,10 +60,16 @@ class Order(models.Model):
     ]
 
     order_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)  # 订单ID，UUID类型
-    user_id = models.ForeignKey('UtoolsUser', on_delete=models.CASCADE)  # 外键，关联到用户
-    order_status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')  # 订单状态
-    amount = models.DecimalField(max_digits=10, decimal_places=2)  # 订单金额
+    user = models.ForeignKey(UtoolsUser, on_delete=models.CASCADE)  # 外键，关联到用户
+    utools_order_id = models.CharField(max_length=50, unique=True, null=True, blank=True)  # uTools 订单号，确保唯一
+    goods_id = models.CharField(max_length=50, null=True, blank=True)  # 商品ID
+    attach = models.TextField(blank=True, null=True)  # 附加数据
+    body = models.CharField(max_length=255)  # 支付内容
+    order_status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='unpaid')  # 订单状态
+    amount = models.DecimalField(max_digits=10, decimal_places=2)  # 订单金额（元）
+    pay_fee = models.IntegerField()  # 支付金额（分）
     created_at = models.DateTimeField(auto_now_add=True)  # 创建时间，记录创建时自动设置
+    paid_at = models.DateTimeField(null=True, blank=True)  # 用户支付时间
     updated_at = models.DateTimeField(auto_now=True)  # 更新时间，记录更新时自动设置
     payment_status = models.CharField(max_length=10, choices=PAYMENT_STATUS_CHOICES, default='unpaid')  # 支付状态
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES, default='wechat')  # 支付方式，默认微信支付
@@ -66,12 +77,17 @@ class Order(models.Model):
     description = models.TextField(blank=True, null=True)  # 订单描述或备注信息
     token_added = models.IntegerField(default=0)  # 订单完成后增加的token数量
 
+
     def __str__(self):
         """
         返回订单的字符串表示，包括订单ID和用户信息。
         """
-        return f"Order {self.order_id} for User {self.user_id}"
+        return f"Order {self.order_id} for User {self.user.username}"
 
+    class Meta:
+        db_table = 'orders'
+        verbose_name = '订单'
+        verbose_name_plural = '订单'
 class WritingTask(models.Model):
     """
     写作任务模型，用于管理用户的写作任务信息和状态。
@@ -85,14 +101,13 @@ class WritingTask(models.Model):
     MODEL_CHOICES = [
         ('bert', 'BERT'),
         ('gpt-3.5-turbo', 'GPT-3.5-Turbo'),
-        # 你可以根据需要添加更多模型类型
     ]
 
     task_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)  # 任务ID，UUID类型
-    user = models.ForeignKey('UtoolsUser', on_delete=models.CASCADE)  # 外键，关联到用户
+    user = models.ForeignKey(UtoolsUser, on_delete=models.CASCADE)  # 外键，关联到用户
     source_language = models.CharField(max_length=100)  # 源语言
     target_language = models.CharField(max_length=100)  # 学习语言
-    model_type = models.CharField(max_length=50, choices=MODEL_CHOICES, default='gpt2')  # 模型类型
+    model_type = models.CharField(max_length=50, choices=MODEL_CHOICES, default='bert')  # 模型类型，确保默认值存在于选择列表中
     ai_understanding_content = models.TextField()  # 源语言辅助AI理解的内容
     user_attempt_content = models.TextField()  # 用户输入的尝试写作内容
     ai_guidance_content = models.TextField(blank=True, null=True)  # AI返回的写作指导内容
@@ -137,3 +152,9 @@ class WritingTask(models.Model):
 
         # 保存实例
         super().save(*args, **kwargs)
+
+    class Meta:
+        db_table = 'writing_tasks'
+        verbose_name = '写作任务'
+        verbose_name_plural = '写作任务'
+
