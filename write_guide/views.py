@@ -1,9 +1,24 @@
-import asyncio
-import json
+from django.utils.decorators import method_decorator
+from .authentication import CustomJWTAuthentication
+from django.utils import timezone
+import requests
+import urllib
+import hmac
+import hashlib
+import time
 import os
-
-from tencentcloud.common import credential
-
+import json
+import asyncio
+import requests
+from asgiref.sync import sync_to_async, async_to_sync
+from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from asgiref.sync import sync_to_async
+# 引入自定义的JWT生成器
+from .authentication import generate_jwt_for_utools_user
 from .models import UtoolsUser, Order, WritingTask
 
 import urllib.parse
@@ -22,22 +37,7 @@ from rest_framework.permissions import IsAuthenticated
 PLUGIN_ID = "z34ufx63"  # 替换为实际的插件应用 ID
 SECRET = "awx7qaX72WPN6L23Ai4GXDkeXDoB3Q1C"  # 替换为实际的 secret
 
-from .models import Order, UtoolsUser
-from .authentication import CustomJWTAuthentication
 
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from django.utils import timezone
-import requests
-import urllib
-import hmac
-import hashlib
-import time
-
-# 引入自定义的JWT生成器
-from .authentication import generate_jwt_for_utools_user
-from .models import UtoolsUser
 
 class UserLoginAPIView(APIView):
     """
@@ -158,40 +158,20 @@ class BalanceView(APIView):
             return Response({"message": "UtoolsUser not found."}, status=status.HTTP_404_NOT_FOUND)
 
 
+
+
+
 class AIWritingAssistant(APIView):
-    """
-    文章改写视图，处理用户的写作请求并提供写作指导。
-    """
     authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
-    def writing_guidance(self, model_name, user_prompt):
-        """
-        根据模型名称和用户提示生成写作指导。
-
-        参数:
-        model_name (str): 使用的模型名称
-        user_prompt (str): 用户提供的写作提示
-
-        返回:
-        dict: 模型返回的写作指导结果或错误信息
-        """
+    async def writing_guidance_async(self, model_name, user_prompt):
         if model_name in ["Qwen/Qwen2-72B-Instruct", "Qwen/Qwen2-57B-A14B-Instruct"]:
-            return self.simulate_silicon_flow(model_name, user_prompt)
-
-        # 其他模型的处理逻辑可在此添加
+            return await self.simulate_silicon_flow(model_name, user_prompt)
         return {"error": "Unsupported model"}
 
+    @sync_to_async
     def simulate_silicon_flow(self, model_name, user_prompt):
-        """
-        调用Silicon Flow API以模拟硅流模型并获取写作指导。
-
-        参数:
-        model_name (str): 使用的模型名称
-        user_prompt (str): 用户提供的写作提示
-
-        返回:
-        dict: 模型返回的写作指导结果
-        """
         url = "https://api.siliconflow.cn/v1/chat/completions"
         payload = {
             "model": model_name,
@@ -213,20 +193,9 @@ class AIWritingAssistant(APIView):
         response = requests.post(url, json=payload, headers=headers)
         return response.json()
 
-    async def translate_text_tencent(self, text, source_lang, target_lang):
-        """
-        调用腾讯云API进行文本翻译。
-
-        参数:
-        text (str): 需要翻译的文本
-        source_lang (str): 源语言
-        target_lang (str): 目标语言
-
-        返回:
-        dict: 翻译结果或错误信息
-        """
+    @sync_to_async
+    def translate_text_tencent(self, text, source_lang, target_lang):
         try:
-            # 获取腾讯云API的凭证
             cred = credential.Credential(os.getenv('TENCENT_CLOUD_API_KEY'), os.getenv('TENCENT_CLOUD_API_SECRET'))
             http_profile = HttpProfile(endpoint="tmt.tencentcloudapi.com")
             client_profile = ClientProfile(httpProfile=http_profile)
@@ -241,9 +210,7 @@ class AIWritingAssistant(APIView):
             }
             req.from_json_string(json.dumps(params))
 
-            # 异步调用API进行翻译
-            loop = asyncio.get_event_loop()
-            resp = await loop.run_in_executor(None, client.TextTranslate, req)
+            resp = client.TextTranslate(req)
             resp_dict = json.loads(resp.to_json_string())
             return {
                 "TargetText": resp_dict.get("TargetText"),
@@ -257,109 +224,73 @@ class AIWritingAssistant(APIView):
             return {"error": "Internal server error", "details": str(e)}
 
     def select_model(self, model_choice):
-        """
-        根据用户选择的模型名称映射到具体的模型。
-
-        参数:
-        model_choice (str): 用户选择的模型名称
-
-        返回:
-        str: 具体使用的模型名称
-        """
-        # model_mapping = {
-        #     "Qwen/Qwen2-72B-Instruct": "Qwen/Qwen2-72B-Instruct",
-        #     "model_2": "Qwen/Qwen2-7B-Instruct",
-        #     # 添加更多模型选择
-        # }
         return model_choice
 
     def compose_prompt_for_writing_guidance(self, user_input, native_lang, learning_lang):
-        """
-        合成用于写作盲猜指导的提示语。
-
-        参数:
-        user_input (str): 用户输入的内容
-        native_lang (str): 用户的母语
-        learning_lang (str): 用户学习的语言
-
-        返回:
-        数组: 用于写作指导的messages
-        """
         message=[
             {"role": "system", "content": f"你是一个富有经验，能力很强的{learning_lang}写作指导教师，而我是一个母语是{native_lang}的{learning_lang}学习者。"},
             {"role": "user", "content": f"现在请你使用{native_lang}来给我解析一下我的{learning_lang}写作内容-{user_input}，我希望你可以给我写作给予一个中肯的评价，同时可以指出我写作内容的不足或者可以改进的东西，可以给我以清晰的思路简练的语言讲清楚哪些写会好，好在哪里。如果它里面有你认为我可能不会的，值得学习的{learning_lang}固定搭配和语法知识请也一并告诉我。"}
         ]
-
-
         return message
 
-    def compose_prompt_for_translated_writing_guidance(self, translated_text, user_input, native_lang, learning_lang):
-        """
-        注释
-        合成用于写作盲猜指导的提示语。
-
-        参数:
-        translated_text (str): 翻译后的文本内容
-        user_input (str): 用户输入的内容
-        native_lang (str): 用户的母语
-        learning_lang (str): 用户学习的语言
-
-        """
-
+    def compose_prompt_for_translated_text(self, translated_text, native_lang, learning_lang):
         message = [
-            {"role": "system",
-             "content": f"你是一个富有经验，能力很强的{learning_lang}写作指导教师，而我是一个母语是{native_lang}的{learning_lang}学习者。"},
-            {"role": "user",
-             "content": f"现在请你使用{native_lang}来给我讲解范文{translated_text}包含的固定搭配和语法知识，同时你会根据我写的内容{user_input}和范文{translated_text}的不同来进行写作指导的讲解和更改建议,如果它里面有你认为我可能不会的，值得学习的固定搭配和语法知识请也一并告诉我。"}
+            {"role": "system", "content": f"你是一个富有经验，能力很强的{learning_lang}写作指导教师，而我是一个母语是{native_lang}的{learning_lang}学习者。"},
+            {"role": "user", "content": f"现在请你使用{native_lang}来给我讲解范文{translated_text}包含的固定搭配和语法知识。如果它里面有你认为我可能不会的，值得学习的固定搭配和语法知识请也一并告诉我。"}
         ]
         return message
 
-    async def post(self, request):
-        """
-        处理POST请求，生成写作指导。
+    def compose_prompt_for_translated_writing_guidance(self, translated_text, user_input, native_lang, learning_lang):
+        message = [
+            {"role": "system", "content": f"你是一个富有经验，能力很强的{learning_lang}写作指导教师，而我是一个母语是{native_lang}的{learning_lang}学习者。"},
+            {"role": "user", "content": f"现在请你使用{native_lang}来给我讲解范文{translated_text}包含的固定搭配和语法知识，同时你会根据我写的内容{user_input}和范文{translated_text}的不同来进行写作指导的讲解和更改建议,如果它里面有你认为我可能不会的，值得学习的固定搭配和语法知识请也一并告诉我。"}
+        ]
+        return message
 
-        参数:
-        request (Request): HTTP请求对象
-
-        返回:
-        Response: HTTP响应对象，包含写作指导结果或错误信息
-        """
+    @method_decorator(csrf_exempt)
+    def post(self, request):
         try:
-            data = request.data
-            user_id = data.get('user_id')
-            token = data.get('token')
-            user_input = data.get('user_input')
+            data = json.loads(request.body)
+            user = request.user
+            if not user.is_authenticated:
+                return JsonResponse({"message": "User not authenticated."}, status=401)
+
+            assist_expression = data.get('assist_expression', None)
+            user_input = data.get('user_input', None)
             native_language = data.get('native_language')
             learning_language = data.get('learning_language')
-            model_choice = data.get('model_choice')
-            assist_expression = data.get('assist_expression', None)
+            model_choice = data.get('model_choice', 'Qwen/Qwen2-72B-Instruct')
 
-            if not all([user_id, token, user_input, native_language, learning_language, model_choice]):
+            if not all([native_language, learning_language, model_choice]):
                 raise ValidationError("Missing required fields")
 
-            # 选择模型
             selected_model = self.select_model(model_choice)
 
-            # 根据是否有辅助表达来合成不同的prompt
-            if not assist_expression:
-                message = self.compose_prompt_for_writing_guidance(user_input, native_language, learning_language)
-                result = self.writing_guidance(selected_model, message)
-            else:
-                translation = await self.translate_text_tencent(assist_expression, native_language, learning_language)
+            if assist_expression and user_input:
+                translation = async_to_sync(self.translate_text_tencent)(assist_expression, native_language, learning_language)
                 if "error" in translation:
-                    return Response(translation, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    return JsonResponse(translation, status=500)
                 translated_text = translation.get("TargetText")
                 message = self.compose_prompt_for_translated_writing_guidance(translated_text, user_input, native_language, learning_language)
-                result = self.writing_guidance(selected_model, message)
+            elif assist_expression and not user_input:
+                translation = async_to_sync(self.translate_text_tencent)(assist_expression, native_language, learning_language)
+                if "error" in translation:
+                    return JsonResponse(translation, status=500)
+                translated_text = translation.get("TargetText")
+                message = self.compose_prompt_for_translated_text(translated_text, native_language, learning_language)
+            elif not assist_expression and user_input:
+                message = self.compose_prompt_for_writing_guidance(user_input, native_language, learning_language)
+            else:
+                return JsonResponse({"error": "Missing both assist_expression and user_input"}, status=400)
 
-            return Response(result, status=status.HTTP_200_OK)
+            result = async_to_sync(self.writing_guidance_async)(selected_model, message)
+            return JsonResponse(result, status=200)
         except ValidationError as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return JsonResponse({"error": str(e)}, status=400)
         except json.JSONDecodeError:
-            return Response({"error": "Invalid JSON"}, status=status.HTTP_400_BAD_REQUEST)
+            return JsonResponse({"error": "Invalid JSON"}, status=400)
         except Exception as e:
-            return Response({"error": "Internal server error", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+            return JsonResponse({"error": "Internal server error", "details": str(e)}, status=500)
 class OrderQueryView(APIView):
     """
     订单查询视图，返回用户的所有订单信息。

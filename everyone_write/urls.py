@@ -1,4 +1,3 @@
-# urls.py
 from django.urls import include, path
 from rest_framework import routers
 from tutorial.quickstart import views
@@ -32,10 +31,9 @@ urlpatterns = [
     path('api-auth/', include('rest_framework.urls', namespace='rest_framework')),
     path('api/login/', UserLoginAPIView.as_view(), name='user-login'),
     path('api/balance/', BalanceView.as_view(), name='balance'),
-    path('api/article-rewrite/', AIWritingAssistant.as_view(), name='article_rewrite'),
+    path('api/writing-guidance/', AIWritingAssistant.as_view(), name='writing_guidance'),
     path('api/order-query/', OrderQueryView.as_view(), name='order_query'),
-    path('api/create-order/', CreateOrderAPIView.as_view(), name='order_create'),  # 新增订单创建和支付路径
-    # 添加Swagger和ReDoc的URL
+    path('api/create-order/', CreateOrderAPIView.as_view(), name='order_create'),
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
     path('swagger.yaml/', schema_view.without_ui(cache_timeout=0), name='schema-json'),

@@ -27,7 +27,9 @@ class UtoolsUser(models.Model):
         """
         return self.delete_time is not None
 
-
+    @property
+    def is_authenticated(self):
+        return True
 
 class Order(models.Model):
     """
