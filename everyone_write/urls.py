@@ -2,7 +2,7 @@
 from django.urls import include, path
 from rest_framework import routers
 from tutorial.quickstart import views
-from write_guide.views import UserLoginAPIView, BalanceView, ArticleRewriteView, OrderQueryView, OrderCreateAndPayView
+from write_guide.views import UserLoginAPIView, BalanceView, AIWritingAssistant, OrderQueryView, CreateOrderAPIView
 
 # 导入drf-yasg相关模块
 from drf_yasg.views import get_schema_view
@@ -27,16 +27,14 @@ router = routers.DefaultRouter()
 router.register(r'users', views.UserViewSet)
 router.register(r'groups', views.GroupViewSet)
 
-# Wire up our API using automatic URL routing.
-# Additionally, we include login URLs for the browsable API.
 urlpatterns = [
     path('', include(router.urls)),
     path('api-auth/', include('rest_framework.urls', namespace='rest_framework')),
     path('api/login/', UserLoginAPIView.as_view(), name='user-login'),
     path('api/balance/', BalanceView.as_view(), name='balance'),
-    path('article-rewrite/', ArticleRewriteView.as_view(), name='article_rewrite'),
-    path('order-query/', OrderQueryView.as_view(), name='order_query'),
-    path('order-create/', OrderCreateAndPayView.as_view(), name='order_create'),
+    path('api/article-rewrite/', AIWritingAssistant.as_view(), name='article_rewrite'),
+    path('api/order-query/', OrderQueryView.as_view(), name='order_query'),
+    path('api/create-order/', CreateOrderAPIView.as_view(), name='order_create'),  # 新增订单创建和支付路径
     # 添加Swagger和ReDoc的URL
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),

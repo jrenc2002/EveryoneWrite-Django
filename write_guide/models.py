@@ -88,6 +88,8 @@ class Order(models.Model):
         db_table = 'orders'
         verbose_name = '订单'
         verbose_name_plural = '订单'
+        
+        
 class WritingTask(models.Model):
     """
     写作任务模型，用于管理用户的写作任务信息和状态。

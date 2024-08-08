@@ -1,21 +1,29 @@
-from .authentication import CustomJWTAuthentication
+import asyncio
+import json
+import os
+
+from tencentcloud.common import credential
+
 from .models import UtoolsUser, Order, WritingTask
-from django.utils import timezone
-from rest_framework_simplejwt.tokens import RefreshToken
-import requests
-import hmac
-import hashlib
-import time
+
 import urllib.parse
-from rest_framework.views import APIView
-from rest_framework.response import Response
+from tencentcloud.common import credential
+from tencentcloud.common.profile.client_profile import ClientProfile
+from tencentcloud.common.profile.http_profile import HttpProfile
+from tencentcloud.tmt.v20180321 import tmt_client, models
+from tencentcloud.common.exception.tencent_cloud_sdk_exception import TencentCloudSDKException
+from dotenv import load_dotenv
+from rest_framework.exceptions import ValidationError
+load_dotenv()  # 从.env文件中读取环境变量
+
 from rest_framework.permissions import IsAuthenticated
-from rest_framework_simplejwt.authentication import JWTAuthentication
-from rest_framework import status
+
 # 插件应用 ID 和 secret，可以在开发者插件应用中获得
 PLUGIN_ID = "z34ufx63"  # 替换为实际的插件应用 ID
 SECRET = "awx7qaX72WPN6L23Ai4GXDkeXDoB3Q1C"  # 替换为实际的 secret
 
+from .models import Order, UtoolsUser
+from .authentication import CustomJWTAuthentication
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -121,7 +129,6 @@ class UserLoginAPIView(APIView):
         }, status=status.HTTP_200_OK)
 
 
-
 class BalanceView(APIView):
     """
     余额查询视图，用于返回用户的余额信息。
@@ -151,38 +158,207 @@ class BalanceView(APIView):
             return Response({"message": "UtoolsUser not found."}, status=status.HTTP_404_NOT_FOUND)
 
 
-class ArticleRewriteView(APIView):
+class AIWritingAssistant(APIView):
     """
     文章改写视图，处理用户的写作请求并提供写作指导。
     """
-    permission_classes = [IsAuthenticated]
+    authentication_classes = [CustomJWTAuthentication]
 
-    def post(self, request):
-        user = request.user
-        source_language = request.data.get('source_language')
-        target_language = request.data.get('target_language')
-        user_attempt_content = request.data.get('user_attempt_content')
-        ai_understanding_content = request.data.get('ai_understanding_content')
+    def writing_guidance(self, model_name, user_prompt):
+        """
+        根据模型名称和用户提示生成写作指导。
 
-        # 生成写作指导（这里可以集成实际的AI模型逻辑）
-        ai_guidance_content = f"Rewritten content from {source_language} to {target_language}"
+        参数:
+        model_name (str): 使用的模型名称
+        user_prompt (str): 用户提供的写作提示
 
-        # 创建写作任务记录
-        writing_task = WritingTask.objects.create(
-            user=user,
-            source_language=source_language,
-            target_language=target_language,
-            ai_understanding_content=ai_understanding_content,
-            user_attempt_content=user_attempt_content,
-            ai_guidance_content=ai_guidance_content,
-        )
+        返回:
+        dict: 模型返回的写作指导结果或错误信息
+        """
+        if model_name in ["Qwen/Qwen2-72B-Instruct", "Qwen/Qwen2-57B-A14B-Instruct"]:
+            return self.simulate_silicon_flow(model_name, user_prompt)
 
-        return Response({
-            'task_id': writing_task.task_id,
-            'ai_guidance_content': writing_task.ai_guidance_content,
-            'token_spent': writing_task.token_spent
-        }, status=200)
+        # 其他模型的处理逻辑可在此添加
+        return {"error": "Unsupported model"}
 
+    def simulate_silicon_flow(self, model_name, user_prompt):
+        """
+        调用Silicon Flow API以模拟硅流模型并获取写作指导。
+
+        参数:
+        model_name (str): 使用的模型名称
+        user_prompt (str): 用户提供的写作提示
+
+        返回:
+        dict: 模型返回的写作指导结果
+        """
+        url = "https://api.siliconflow.cn/v1/chat/completions"
+        payload = {
+            "model": model_name,
+            "messages": user_prompt,
+            "stream": False,
+            "max_tokens": 512,
+            "temperature": 0.7,
+            "top_p": 0.7,
+            "top_k": 50,
+            "frequency_penalty": 0.5,
+            "n": 1
+        }
+        headers = {
+            "accept": "application/json",
+            "content-type": "application/json",
+            "authorization": f"Bearer {os.getenv('SILICON_FLOW_API_KEY')}"
+        }
+
+        response = requests.post(url, json=payload, headers=headers)
+        return response.json()
+
+    async def translate_text_tencent(self, text, source_lang, target_lang):
+        """
+        调用腾讯云API进行文本翻译。
+
+        参数:
+        text (str): 需要翻译的文本
+        source_lang (str): 源语言
+        target_lang (str): 目标语言
+
+        返回:
+        dict: 翻译结果或错误信息
+        """
+        try:
+            # 获取腾讯云API的凭证
+            cred = credential.Credential(os.getenv('TENCENT_CLOUD_API_KEY'), os.getenv('TENCENT_CLOUD_API_SECRET'))
+            http_profile = HttpProfile(endpoint="tmt.tencentcloudapi.com")
+            client_profile = ClientProfile(httpProfile=http_profile)
+            client = tmt_client.TmtClient(cred, "ap-beijing", client_profile)
+
+            req = models.TextTranslateRequest()
+            params = {
+                "SourceText": text,
+                "Source": source_lang,
+                "Target": target_lang,
+                "ProjectId": 100016275430
+            }
+            req.from_json_string(json.dumps(params))
+
+            # 异步调用API进行翻译
+            loop = asyncio.get_event_loop()
+            resp = await loop.run_in_executor(None, client.TextTranslate, req)
+            resp_dict = json.loads(resp.to_json_string())
+            return {
+                "TargetText": resp_dict.get("TargetText"),
+                "Source": source_lang,
+                "Target": target_lang,
+                "RequestId": resp_dict.get("RequestId")
+            }
+        except TencentCloudSDKException as err:
+            return {"error": "API request failed", "details": str(err)}
+        except Exception as e:
+            return {"error": "Internal server error", "details": str(e)}
+
+    def select_model(self, model_choice):
+        """
+        根据用户选择的模型名称映射到具体的模型。
+
+        参数:
+        model_choice (str): 用户选择的模型名称
+
+        返回:
+        str: 具体使用的模型名称
+        """
+        # model_mapping = {
+        #     "Qwen/Qwen2-72B-Instruct": "Qwen/Qwen2-72B-Instruct",
+        #     "model_2": "Qwen/Qwen2-7B-Instruct",
+        #     # 添加更多模型选择
+        # }
+        return model_choice
+
+    def compose_prompt_for_writing_guidance(self, user_input, native_lang, learning_lang):
+        """
+        合成用于写作盲猜指导的提示语。
+
+        参数:
+        user_input (str): 用户输入的内容
+        native_lang (str): 用户的母语
+        learning_lang (str): 用户学习的语言
+
+        返回:
+        数组: 用于写作指导的messages
+        """
+        message=[
+            {"role": "system", "content": f"你是一个富有经验，能力很强的{learning_lang}写作指导教师，而我是一个母语是{native_lang}的{learning_lang}学习者。"},
+            {"role": "user", "content": f"现在请你使用{native_lang}来给我解析一下我的{learning_lang}写作内容-{user_input}，我希望你可以给我写作给予一个中肯的评价，同时可以指出我写作内容的不足或者可以改进的东西，可以给我以清晰的思路简练的语言讲清楚哪些写会好，好在哪里。如果它里面有你认为我可能不会的，值得学习的{learning_lang}固定搭配和语法知识请也一并告诉我。"}
+        ]
+
+
+        return message
+
+    def compose_prompt_for_translated_writing_guidance(self, translated_text, user_input, native_lang, learning_lang):
+        """
+        注释
+        合成用于写作盲猜指导的提示语。
+
+        参数:
+        translated_text (str): 翻译后的文本内容
+        user_input (str): 用户输入的内容
+        native_lang (str): 用户的母语
+        learning_lang (str): 用户学习的语言
+
+        """
+
+        message = [
+            {"role": "system",
+             "content": f"你是一个富有经验，能力很强的{learning_lang}写作指导教师，而我是一个母语是{native_lang}的{learning_lang}学习者。"},
+            {"role": "user",
+             "content": f"现在请你使用{native_lang}来给我讲解范文{translated_text}包含的固定搭配和语法知识，同时你会根据我写的内容{user_input}和范文{translated_text}的不同来进行写作指导的讲解和更改建议,如果它里面有你认为我可能不会的，值得学习的固定搭配和语法知识请也一并告诉我。"}
+        ]
+        return message
+
+    async def post(self, request):
+        """
+        处理POST请求，生成写作指导。
+
+        参数:
+        request (Request): HTTP请求对象
+
+        返回:
+        Response: HTTP响应对象，包含写作指导结果或错误信息
+        """
+        try:
+            data = request.data
+            user_id = data.get('user_id')
+            token = data.get('token')
+            user_input = data.get('user_input')
+            native_language = data.get('native_language')
+            learning_language = data.get('learning_language')
+            model_choice = data.get('model_choice')
+            assist_expression = data.get('assist_expression', None)
+
+            if not all([user_id, token, user_input, native_language, learning_language, model_choice]):
+                raise ValidationError("Missing required fields")
+
+            # 选择模型
+            selected_model = self.select_model(model_choice)
+
+            # 根据是否有辅助表达来合成不同的prompt
+            if not assist_expression:
+                message = self.compose_prompt_for_writing_guidance(user_input, native_language, learning_language)
+                result = self.writing_guidance(selected_model, message)
+            else:
+                translation = await self.translate_text_tencent(assist_expression, native_language, learning_language)
+                if "error" in translation:
+                    return Response(translation, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                translated_text = translation.get("TargetText")
+                message = self.compose_prompt_for_translated_writing_guidance(translated_text, user_input, native_language, learning_language)
+                result = self.writing_guidance(selected_model, message)
+
+            return Response(result, status=status.HTTP_200_OK)
+        except ValidationError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except json.JSONDecodeError:
+            return Response({"error": "Invalid JSON"}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": "Internal server error", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class OrderQueryView(APIView):
     """
@@ -196,39 +372,135 @@ class OrderQueryView(APIView):
         return Response({'orders': list(orders)}, status=200)
 
 
-class OrderCreateAndPayView(APIView):
+class CreateOrderAPIView(APIView):
     """
-    订单创建和支付视图，处理用户订单创建和支付请求。
+    创建订单并处理支付的API视图。
     """
-    permission_classes = [IsAuthenticated]
+    authentication_classes = [CustomJWTAuthentication]
+
+    def get_signature(self, params):
+        """
+        根据uTools的签名方法生成请求签名。
+        """
+        sorted_params = sorted(params.items())
+        str_to_sign = urllib.parse.urlencode(sorted_params)
+        sign = hmac.new(SECRET.encode('utf-8'), str_to_sign.encode('utf-8'), hashlib.sha256).hexdigest()
+        return sign
+
+    def create_goods(self, title, total_fee):
+        """
+        通过uTools API动态创建商品。
+        """
+        url = "https://open.u-tools.cn/goods"
+        timestamp = int(time.time())
+
+        params = {
+            "plugin_id": PLUGIN_ID,
+            "title": title,
+            "total_fee": total_fee,
+            "timestamp": str(timestamp),
+        }
+
+        sign = self.get_signature(params)
+        params["sign"] = sign
+
+        headers = {
+            "Accept": "application/json",
+        }
+
+        response = requests.post(url, json=params, headers=headers)
+
+        if response.status_code == 200:
+            return response.json().get("message")
+        else:
+            return None
+
+    def get_payment_status(self, out_order_id):
+        """
+        通过uTools API查询订单支付状态。
+        """
+        url = "https://open.u-tools.cn/payments/record"
+        timestamp = int(time.time())
+
+        params = {
+            "plugin_id": PLUGIN_ID,
+            "out_order_id": out_order_id,
+            "timestamp": str(timestamp),
+        }
+
+        sign = self.get_signature(params)
+        params["sign"] = sign
+
+        headers = {
+            "Accept": "application/json",
+        }
+
+        response = requests.get(url, params=params, headers=headers)
+
+        if response.status_code == 200:
+            return response.json().get("resource")
+        else:
+            return None
 
     def post(self, request):
-        user = request.user
-        amount = request.data.get('amount')
-        payment_method = request.data.get('payment_method', 'wechat')
+        """
+        处理订单创建和支付请求。
+        """
+        user = request.user  # 经过身份验证的用户
+        if not isinstance(user, UtoolsUser):
+            return Response({"message": "User not authenticated."}, status=status.HTTP_401_UNAUTHORIZED)
 
-        # 创建订单
+        # 获取前端传来的订单数据
+        body = request.data.get("body")
+        amount = request.data.get("amount")  # 金额（元）
+        total_fee = int(amount * 100)  # 转换为分
+
+        # 创建uTools商品
+        goods_id = self.create_goods(title=body, total_fee=total_fee)
+        if not goods_id:
+            return Response({"message": "Failed to create goods on uTools."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # 创建新订单
         order = Order.objects.create(
-            user_id=user,
+            user=user,
+            body=body,
             amount=amount,
-            payment_method=payment_method,
-            currency='CNY',
+            pay_fee=total_fee,
+            goods_id=goods_id,
+            order_status='pending',
+            payment_status='unpaid',
         )
 
-        # 模拟支付逻辑
-        payment_status = 'success'  # 假设支付成功
+        # 返回订单ID和支付信息给前端
+        return Response({
+            "message": "Order created",
+            "order_id": order.order_id,
+            "amount": amount,
+            "pay_fee": total_fee,
+            "goods_id": goods_id
+        }, status=status.HTTP_201_CREATED)
 
-        if payment_status == 'success':
+    def put(self, request):
+        """
+        处理支付成功后的确认请求。
+        """
+        order_id = request.data.get("order_id")
+        try:
+            order = Order.objects.get(order_id=order_id)
+        except Order.DoesNotExist:
+            return Response({"message": "Order not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        payment_status = self.get_payment_status(order.utools_order_id)
+        if payment_status and payment_status.get("status") == 10:
             order.payment_status = 'paid'
-            order.order_status = 'completed'
-            order.token_added = 100  # 假设支付成功后增加100 token
+            order.paid_at = timezone.now()
             order.save()
 
+            # 增加用户token
+            user = order.user
             user.token_balance += order.token_added
             user.save()
 
-            return Response({'status': 'success', 'balance': user.token_balance}, status=200)
+            return Response({"message": "Payment confirmed and tokens added."}, status=status.HTTP_200_OK)
         else:
-            order.payment_status = 'failed'
-            order.save()
-            return Response({'status': 'failed'}, status=400)
+            return Response({"message": "Payment not confirmed."}, status=status.HTTP_400_BAD_REQUEST)
